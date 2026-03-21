@@ -23,8 +23,10 @@ class BigQuerySource(DataSource):
         client = bigquery.Client(project=self.project_id)
 
         if self.sql_query:
-            # Envolve a query do usuario com LIMIT de seguranca
-            safe_query = f"SELECT * FROM ({self.sql_query}) LIMIT {self.MAX_ROWS}"
+            normalized = self.sql_query.strip()
+            if not normalized.upper().startswith("SELECT"):
+                raise ValueError("Apenas queries SELECT sao permitidas no BigQuery.")
+            safe_query = f"SELECT * FROM ({normalized}) LIMIT {self.MAX_ROWS}"
             query_job = client.query(safe_query)
             df = query_job.to_dataframe()
         else:

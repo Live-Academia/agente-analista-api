@@ -35,7 +35,9 @@ async def generate_report(req: ReportRequest) -> ReportResponse:
         insights_result = insights_node(state)
         if insights_result.get("error"):
             raise HTTPException(status_code=500, detail=insights_result["error"])
-        state["insights"] = insights_result.get("insights", [])
+        if "insights" not in insights_result:
+            raise HTTPException(status_code=500, detail="Falha ao gerar insights — resposta vazia do LLM.")
+        state["insights"] = insights_result["insights"]
 
     # Gera relatorio Markdown
     report_result = report_node(state)

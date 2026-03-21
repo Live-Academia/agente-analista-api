@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from api.schemas import ChatRequest, ChatResponse
-from deep_agent.chains.qa import qa_node
+from deep_agent.chains.qa import format_qa_data, qa_node
 from deep_agent.config import get_llm
 from deep_agent.prompts.qa_prompt import qa_prompt
 
@@ -45,15 +45,13 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
     """Responde uma pergunta com streaming de tokens (SSE)."""
     import json
 
-    from deep_agent.chains.qa import _format_qa_data
-
     state = _build_state_from_request(req)
 
     async def generate():
         try:
             llm = get_llm()
             chain = qa_prompt | llm
-            prompt_data = _format_qa_data(state)
+            prompt_data = format_qa_data(state)
             async for chunk in chain.astream(prompt_data):
                 if chunk.content:
                     yield chunk.content
