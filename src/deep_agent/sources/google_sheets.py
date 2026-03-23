@@ -32,21 +32,26 @@ def _get_service_account_client(credentials_hash: str, credentials_json: str) ->
 
 
 def _get_oauth2_client(authorized_user_json: str) -> gspread.Client:
-    """Cria cliente gspread usando OAuth2 com refresh automatico de token."""
+    """Cria cliente gspread usando OAuth2 com refresh automatico de token.
+
+    Usa os scopes originais do token (nao sobrescreve) para evitar
+    invalid_scope ao renovar credenciais geradas via gcloud ADC.
+    """
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials as OAuth2Credentials
 
     auth_data = json.loads(authorized_user_json)
+    # Nao passar scopes — usa os scopes originais do token (ex: cloud-platform)
+    # que ja incluem acesso a Sheets e Drive
     credentials = OAuth2Credentials(
         token=auth_data.get("access_token"),
         refresh_token=auth_data.get("refresh_token"),
         token_uri="https://oauth2.googleapis.com/token",
         client_id=auth_data.get("client_id"),
         client_secret=auth_data.get("client_secret"),
-        scopes=SCOPES,
     )
-    if credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
+    # Forcar refresh para garantir token valido
+    credentials.refresh(Request())
     return gspread.authorize(credentials)
 
 
