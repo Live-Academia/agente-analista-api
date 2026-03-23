@@ -1,4 +1,4 @@
-app = 'agente-analista-api'
+app = 'agente-analista'
 primary_region = 'gru'
 
 [build]
