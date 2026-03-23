@@ -11,8 +11,15 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+import uuid
+
 from deep_agent.chains.qa import qa_node
+from deep_agent.export.pdf_exporter import markdown_to_pdf
 from deep_agent.graph import build_graph
+from deep_agent.storage.history import get_user_analyses, load_analysis, save_message
+from deep_agent.storage.logger import log_operation
+from deep_agent.templates import TEMPLATES
+from deep_agent.templates.detector import detect_template
 
 # ── Config da pagina ────────────────────────────────────────────────────────
 
@@ -218,7 +225,7 @@ MAX_CHAT_HISTORY = 50
 
 for key, default in [("df", None), ("agent_state", None), ("chat_history", []),
                       ("report_text", None), ("file_path_tmp", None), ("data_source", None),
-                      ("source_name", "")]:
+                      ("source_name", ""), ("session_id", None), ("template", None)]:
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -241,9 +248,15 @@ def save_uploaded_file(f) -> str:
         return tmp.name
 
 
-def run_pipeline(file_path=None, data_source=None) -> dict:
+def run_pipeline(file_path=None, data_source=None, template: str | None = None) -> dict:
     graph = build_graph()
-    return graph.invoke({"file_path": file_path, "data_source": data_source, "mode": "report", "user_question": None})
+    return graph.invoke({
+        "file_path": file_path,
+        "data_source": data_source,
+        "mode": "report",
+        "user_question": None,
+        "template": template,
+    })
 
 
 def run_qa(state: dict, question: str) -> str:
@@ -254,10 +267,16 @@ def run_qa(state: dict, question: str) -> str:
         return f"Erro ao consultar o LLM: {e}"
 
 
-def run_report(file_path=None, data_source=None) -> dict:
+def run_report(file_path=None, data_source=None, template: str | None = None) -> dict:
     try:
         graph = build_graph()
-        return graph.invoke({"file_path": file_path, "data_source": data_source, "mode": "report", "user_question": None})
+        return graph.invoke({
+            "file_path": file_path,
+            "data_source": data_source,
+            "mode": "report",
+            "user_question": None,
+            "template": template,
+        })
     except Exception as e:
         return {"error": f"Erro ao gerar relatorio: {e}"}
 
@@ -321,27 +340,39 @@ with st.sidebar:
     source_type = st.radio("Fonte", source_options, label_visibility="collapsed")
     st.markdown("")
 
-    def _load(source_id: str, source_name: str, **kwargs):
+    def _load(source_id: str, source_name: str, template_override: str | None = None, **kwargs):
         if st.session_state.get("_source_id") == source_id:
             return
         st.session_state._source_id = source_id
         st.session_state.chat_history = []
         st.session_state.report_text = None
         st.session_state.source_name = source_name
+        st.session_state.session_id = uuid.uuid4().hex
 
         with st.status("Carregando dados...", expanded=True) as status:
             st.write("Conectando a fonte...")
-            result = run_pipeline(**kwargs)
+            result = run_pipeline(template=template_override, **kwargs)
             if result.get("error"):
                 status.update(label="Erro na conexao", state="error")
                 st.error(result["error"])
+                log_operation("analyze", status="error", username=current_username,
+                              source_name=source_name, metadata={"error": result["error"]})
                 return
             st.write("Analisando padroes e metricas...")
-            st.session_state.df = result["raw_data"]
+            raw = result["raw_data"]
+            st.session_state.df = raw
             st.session_state.agent_state = result
             st.session_state.data_source = kwargs.get("data_source")
-            rows = len(result["raw_data"])
-            cols = len(result["raw_data"].columns)
+
+            # Auto-deteccao de template
+            detected = detect_template(raw.columns.tolist())
+            st.session_state.template = template_override or detected
+
+            rows = len(raw)
+            cols = len(raw.columns)
+            log_operation("analyze", status="ok", session_id=st.session_state.session_id,
+                          username=current_username, source_name=source_name,
+                          metadata={"rows": rows, "columns": cols, "template": st.session_state.template})
             status.update(label=f"Pronto — {rows:,} linhas x {cols} colunas", state="complete")
 
     if source_type == "📄 Arquivo":
@@ -394,6 +425,48 @@ with st.sidebar:
                 from deep_agent.sources.bigquery import BigQuerySource
                 _load(f"bq_{tid or hash(sql)}", "BigQuery", data_source=BigQuerySource(settings.gcp_project_id, tid, sql))
 
+    # Template selector
+    st.markdown("---")
+    template_labels = {"": "Nenhum"} | {t.name: t.label for t in TEMPLATES.values()}
+    current_tmpl = st.session_state.get("template") or ""
+    tmpl_options = list(template_labels.keys())
+    tmpl_idx = tmpl_options.index(current_tmpl) if current_tmpl in tmpl_options else 0
+    selected_tmpl_key = st.selectbox(
+        "Template de Analise",
+        options=tmpl_options,
+        format_func=lambda k: f"{'🔍 ' if k == current_tmpl and k else ''}{template_labels[k]}",
+        index=tmpl_idx,
+        help="Templates direcionam os insights da IA para o dominio especifico",
+    )
+    if selected_tmpl_key != current_tmpl:
+        st.session_state.template = selected_tmpl_key or None
+
+    # Historico de analises
+    if current_username and current_username != "dev":
+        with st.expander("📂 Historico"):
+            past = get_user_analyses(current_username, limit=15)
+            if past:
+                for item in past:
+                    dt = item["created_at"][:10]
+                    tmpl_tag = f" [{item['template_used']}]" if item.get("template_used") else ""
+                    label = f"{dt} — {item['source_name']}{tmpl_tag}"
+                    if st.button(label, key=f"hist_{item['session_id']}", use_container_width=True):
+                        loaded = load_analysis(item["session_id"])
+                        if loaded:
+                            # Restaurar estado (sem raw_data — apenas analise)
+                            st.session_state.agent_state = loaded
+                            st.session_state.df = None  # sem DataFrame raw no historico
+                            st.session_state.session_id = item["session_id"]
+                            st.session_state.source_name = loaded["source_name"]
+                            st.session_state.template = loaded.get("template_used")
+                            st.session_state.chat_history = []
+                            st.session_state.report_text = None
+                            st.session_state._source_id = f"hist_{item['session_id']}"
+                            st.session_state._history_mode = True
+                            st.rerun()
+            else:
+                st.caption("Nenhuma analise salva ainda.")
+
     st.markdown("---")
     page = st.radio("", ["📈 Dashboard", "💬 Chat", "📄 Relatorio"], label_visibility="collapsed")
     st.markdown("---")
@@ -405,8 +478,9 @@ with st.sidebar:
 
 df = st.session_state.df
 state = st.session_state.agent_state
+history_mode = st.session_state.get("_history_mode", False)
 
-if df is None:
+if df is None and state is None:
     st.markdown("# 🔮 Deep Agent")
     st.markdown("##### Analise dados com Inteligencia Artificial em 3 passos")
     st.markdown("")
@@ -426,21 +500,31 @@ if df is None:
 # ── Context bar ─────────────────────────────────────────────────────────────
 _context_bar()
 
-summary = state.get("data_summary", {})
-stats = state.get("statistical_analysis", {})
-patterns = state.get("patterns", [])
+summary = state.get("data_summary", {}) if state else {}
+stats = state.get("statistical_analysis", {}) if state else {}
+patterns = state.get("patterns", []) if state else []
 business = stats.get("business_metrics", {})
 temporal = stats.get("temporal", {})
 segments = stats.get("segments", {})
 shape = summary.get("shape", {})
-numeric_cols = df.select_dtypes(include="number").columns.tolist()
-categorical_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+numeric_cols = df.select_dtypes(include="number").columns.tolist() if df is not None else summary.get("numeric_columns", [])
+categorical_cols = df.select_dtypes(include=["object", "category"]).columns.tolist() if df is not None else summary.get("categorical_columns", [])
 
 # ═══════════════════════════════════════════════════════════════════════════
 # DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════
 
 if page == "📈 Dashboard":
+    if history_mode and df is None:
+        st.info("Analise carregada do historico — dados raw nao disponiveis. Use **Chat** ou **Relatorio** para continuar.")
+        # Mostrar insights salvos
+        insights = state.get("insights", []) if state else []
+        if insights:
+            _section("💡 Insights Salvos")
+            for i, ins in enumerate(insights, 1):
+                st.markdown(f"**{i}.** {ins}")
+        st.stop()
+
     if business:
         kc = st.columns(4)
         kpis = [
@@ -592,17 +676,23 @@ elif page == "💬 Chat":
 
     if not st.session_state.chat_history:
         st.caption("Sugestoes baseadas nos seus dados:")
-        suggestions = []
-        if business:
-            suggestions.append("Qual a margem de lucro por segmento?")
-        if temporal and temporal.get("growth"):
-            suggestions.append("Qual a tendencia de crescimento?")
-        if numeric_cols:
-            suggestions.append(f"Quais outliers existem em '{numeric_cols[0]}'?")
-        if categorical_cols:
-            suggestions.append(f"Como se distribui '{categorical_cols[0]}'?")
-        if not suggestions:
-            suggestions = ["Resuma os principais insights dos dados", "Quais padroes voce identifica?"]
+        # Usar sugestoes do template ativo se disponivel
+        tmpl_name = st.session_state.get("template")
+        tmpl = TEMPLATES.get(tmpl_name) if tmpl_name else None
+        if tmpl and tmpl.suggested_questions:
+            suggestions = tmpl.suggested_questions[:4]
+        else:
+            suggestions = []
+            if business:
+                suggestions.append("Qual a margem de lucro por segmento?")
+            if temporal and temporal.get("growth"):
+                suggestions.append("Qual a tendencia de crescimento?")
+            if numeric_cols:
+                suggestions.append(f"Quais outliers existem em '{numeric_cols[0]}'?")
+            if categorical_cols:
+                suggestions.append(f"Como se distribui '{categorical_cols[0]}'?")
+            if not suggestions:
+                suggestions = ["Resuma os principais insights dos dados", "Quais padroes voce identifica?"]
 
         scols = st.columns(min(len(suggestions), 2))
         for i, s in enumerate(suggestions):
@@ -612,6 +702,10 @@ elif page == "💬 Chat":
                     with st.spinner("Analisando..."):
                         answer = run_qa(state, s)
                     st.session_state.chat_history.append({"role": "assistant", "content": answer})
+                    _sid = st.session_state.get("session_id")
+                    if _sid and current_username != "dev":
+                        save_message(_sid, current_username, "user", s)
+                        save_message(_sid, current_username, "assistant", answer)
                     st.rerun()
 
     for msg in st.session_state.chat_history:
@@ -628,6 +722,13 @@ elif page == "💬 Chat":
             st.markdown(answer)
         st.session_state.chat_history.append({"role": "assistant", "content": answer})
 
+        _sid = st.session_state.get("session_id")
+        if _sid and current_username != "dev":
+            save_message(_sid, current_username, "user", prompt)
+            save_message(_sid, current_username, "assistant", answer)
+        log_operation("chat", status="ok", session_id=_sid, username=current_username,
+                      source_name=st.session_state.get("source_name", ""))
+
         if len(st.session_state.chat_history) > MAX_CHAT_HISTORY:
             st.session_state.chat_history = st.session_state.chat_history[-MAX_CHAT_HISTORY:]
 
@@ -642,12 +743,17 @@ elif page == "📄 Relatorio":
     if st.session_state.report_text:
         st.markdown(st.session_state.report_text)
 
-        dc1, dc2 = st.columns(2)
+        dc1, dc2, dc3 = st.columns(3)
         with dc1:
-            st.download_button("⬇️ Download Relatorio (.md)", st.session_state.report_text, "relatorio_deep_agent.md", "text/markdown")
+            st.download_button("⬇️ Baixar .md", st.session_state.report_text, "relatorio_deep_agent.md", "text/markdown")
         with dc2:
-            csv = df.to_csv(index=False)
-            st.download_button("⬇️ Download Dados (.csv)", csv, "dados_analisados.csv", "text/csv")
+            source = st.session_state.get("source_name", "relatorio")
+            pdf_bytes = markdown_to_pdf(st.session_state.report_text, title=f"Relatorio — {source}")
+            st.download_button("⬇️ Baixar PDF", pdf_bytes, "relatorio_deep_agent.pdf", "application/pdf")
+        with dc3:
+            if df is not None:
+                csv = df.to_csv(index=False)
+                st.download_button("⬇️ Baixar .csv", csv, "dados_analisados.csv", "text/csv")
     else:
         if not _check_api_key():
             st.warning("Configure a API key do LLM para gerar relatorios.")
@@ -662,6 +768,7 @@ elif page == "📄 Relatorio":
                 result = run_report(
                     file_path=st.session_state.get("file_path_tmp"),
                     data_source=st.session_state.get("data_source"),
+                    template=st.session_state.get("template"),
                 )
                 if result.get("error"):
                     status.update(label="Erro", state="error")
@@ -669,6 +776,8 @@ elif page == "📄 Relatorio":
                 elif result.get("report"):
                     st.session_state.report_text = result["report"]
                     st.session_state.agent_state = result
+                    log_operation("report", status="ok", session_id=st.session_state.get("session_id"),
+                                  username=current_username, source_name=st.session_state.get("source_name", ""))
                     status.update(label="Relatorio pronto!", state="complete")
                     st.rerun()
                 else:

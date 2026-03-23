@@ -11,6 +11,13 @@ Regras:
 - Responda em portugues brasileiro
 - Seja conciso mas completo
 - Formate com markdown quando apropriado (tabelas, listas, negrito)
+
+REGRAS DE INTEGRIDADE DE DADOS (obrigatorio):
+- Responda APENAS com base nos dados analisados — nunca invente valores
+- Se a pergunta nao pode ser respondida com os dados disponiveis, diga: "Esses dados nao estao disponiveis no dataset atual"
+- Cite metricas especificas do dataset ao responder (coluna, valor)
+- Nao assuma dados fora do escopo da analise atual
+- Diferencie correlacao de causalidade explicitamente
 """
 
 QA_HUMAN = """\

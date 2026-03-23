@@ -39,6 +39,8 @@ dependencies = [
     "streamlit>=1.40",
     "plotly>=5.24",
     "streamlit-authenticator>=0.4.2",
+    # PDF export
+    "fpdf2>=2.7",
 ]
 
 [project.optional-dependencies]

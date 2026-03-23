@@ -8,11 +8,13 @@ from pydantic import BaseModel
 class AnalysisResult(BaseModel):
     """Resultado da analise retornado pelo endpoint /api/analyze."""
 
+    session_id: str  # UUID unico da sessao de analise
     data_summary: dict
     statistical_analysis: dict
     patterns: list[str]
     insights: list[str]
     source_name: str
+    template_used: str | None = None
     error: str | None = None
 
 
@@ -21,6 +23,7 @@ class ChatRequest(BaseModel):
 
     question: str
     analysis_state: dict  # AnalysisResult serializado
+    session_id: str | None = None  # Para salvar mensagens no historico
 
 
 class ChatResponse(BaseModel):
