@@ -152,10 +152,10 @@ AUTH_CONFIG_YAML = os.environ.get("AUTH_CONFIG_YAML", "")
 
 
 @st.cache_resource
-def _get_sheets_client(credentials_json: str):
+def _get_sheets_client(credentials_json: str, auth_method: str = "service_account", authorized_user_json: str = ""):
     """Singleton do cliente gspread — criado uma unica vez entre reruns."""
     from deep_agent.sources.google_sheets import GoogleSheetsSource
-    GoogleSheetsSource.init_client(credentials_json)
+    GoogleSheetsSource.init_client(credentials_json, auth_method=auth_method, authorized_user_json=authorized_user_json)
     return GoogleSheetsSource._singleton_client
 
 
@@ -394,13 +394,26 @@ with st.sidebar:
                 parts = url.split("/d/")
                 if len(parts) > 1:
                     sid = parts[1].split("/")[0]
-            if not settings.google_credentials_json:
-                st.error("Configure GOOGLE_CREDENTIALS_JSON")
+            has_creds = settings.google_credentials_json or settings.google_authorized_user_json
+            if not has_creds:
+                st.error("Configure GOOGLE_CREDENTIALS_JSON ou GOOGLE_AUTHORIZED_USER_JSON no servidor.")
             else:
                 from deep_agent.sources.google_sheets import GoogleSheetsSource
-                # Garante singleton inicializado com @st.cache_resource
-                _get_sheets_client(settings.google_credentials_json)
-                _load(f"gs_{sid}", "Google Sheets", data_source=GoogleSheetsSource(sid, settings.google_credentials_json, tab))
+                _get_sheets_client(
+                    settings.google_credentials_json,
+                    auth_method=settings.google_auth_method,
+                    authorized_user_json=settings.google_authorized_user_json,
+                )
+                _load(
+                    f"gs_{sid}", "Google Sheets",
+                    data_source=GoogleSheetsSource(
+                        sid,
+                        settings.google_credentials_json,
+                        tab,
+                        auth_method=settings.google_auth_method,
+                        authorized_user_json=settings.google_authorized_user_json,
+                    ),
+                )
 
     elif source_type == "🗄️ Supabase":
         from deep_agent.config import settings
