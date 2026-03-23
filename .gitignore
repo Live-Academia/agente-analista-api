@@ -35,3 +35,7 @@ htmlcov/
 
 # Fly.io
 .fly/
+
+# Credenciais de autenticacao — nunca commitar
+auth_config.yaml
+*.yaml.local

@@ -7,7 +7,7 @@ from deep_agent.prompts.qa_prompt import qa_prompt
 from deep_agent.state import AgentState
 
 
-def _format_qa_data(state: AgentState) -> dict:
+def format_qa_data(state: AgentState) -> dict:
     """Prepara os dados do state para o prompt de Q&A."""
     summary = state.get("data_summary") or {}
     stats = state.get("statistical_analysis") or {}
@@ -39,7 +39,7 @@ def qa_node(state: AgentState) -> dict:
     try:
         llm = get_llm()
 
-        prompt_data = _format_qa_data(state)
+        prompt_data = format_qa_data(state)
         chain = qa_prompt | llm
         response = chain.invoke(prompt_data)
 

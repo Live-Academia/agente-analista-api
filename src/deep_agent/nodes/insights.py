@@ -14,6 +14,18 @@ def _format_prompt_data(state: AgentState) -> dict:
     stats = state.get("statistical_analysis") or {}
     shape = summary.get("shape", {})
 
+    # Template focus: instrucao adicional se um template estiver ativo
+    template_focus = "Nenhum template especifico — analise generica."
+    template_name = state.get("template")
+    if template_name:
+        try:
+            from deep_agent.templates import TEMPLATES
+            tmpl = TEMPLATES.get(template_name)
+            if tmpl:
+                template_focus = f"Template '{tmpl.label}': {tmpl.insight_focus}"
+        except Exception:
+            pass
+
     return {
         "rows": shape.get("rows", "N/A"),
         "columns": shape.get("columns", "N/A"),
@@ -28,6 +40,7 @@ def _format_prompt_data(state: AgentState) -> dict:
         "business_metrics": json.dumps(stats.get("business_metrics", {}), indent=2, default=str) or "Sem metricas de negocio",
         "patterns": "\n".join(f"- {p}" for p in state.get("patterns", [])) or "Nenhum padrao detectado",
         "head": json.dumps(summary.get("head", []), indent=2, default=str),
+        "template_focus": template_focus,
     }
 
 

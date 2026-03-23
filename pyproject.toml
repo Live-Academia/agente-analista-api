@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "deep-agent-api"
 version = "1.0.0"
-description = "Deep Agent — Backend FastAPI + LangGraph para analise de dados com IA"
+description = "Deep Agent — Backend FastAPI + LangGraph + Streamlit para analise de dados com IA"
 requires-python = ">=3.11"
 dependencies = [
     # API
@@ -29,6 +29,18 @@ dependencies = [
     "supabase>=2.0",
     "google-cloud-bigquery>=3.0",
     "db-dtypes>=1.0",
+    # Google Sheets — retry
+    "tenacity>=0.9",
+    # Autenticacao FastAPI
+    "python-jose[cryptography]>=3.3",
+    "passlib[bcrypt]>=1.7",
+    "pyyaml>=6.0",
+    # Streamlit frontend
+    "streamlit>=1.40",
+    "plotly>=5.24",
+    "streamlit-authenticator>=0.4.2",
+    # PDF export
+    "fpdf2>=2.7",
 ]
 
 [project.optional-dependencies]

@@ -4,6 +4,9 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    curl \
+    nginx \
+    supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .
@@ -12,9 +15,16 @@ COPY api/ api/
 
 RUN pip install --no-cache-dir -e .
 
-EXPOSE 8080
+COPY app.py .
+COPY .streamlit/ .streamlit/
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY supervisord.conf /etc/supervisor/conf.d/app.conf
+
+RUN mkdir -p data output
+
+EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"
+    CMD curl -sf http://localhost/health || exit 1
 
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]

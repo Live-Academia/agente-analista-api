@@ -3,57 +3,111 @@
 from __future__ import annotations
 
 import tempfile
+import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from api.schemas import AnalysisResult
+from api.security import get_current_user, require_admin
 from deep_agent.graph import build_graph
+from deep_agent.storage.history import save_analysis
+from deep_agent.storage.logger import log_operation
 
 router = APIRouter()
 
 
-def _run_pipeline(file_path: str | None = None, data_source=None, source_name: str = "") -> AnalysisResult:
+def _run_pipeline(
+    username: str,
+    file_path: str | None = None,
+    data_source=None,
+    source_name: str = "",
+    template: str | None = None,
+) -> AnalysisResult:
     """Executa o grafo LangGraph e retorna AnalysisResult JSON-serializavel."""
+    session_id = uuid.uuid4().hex
     graph = build_graph()
     result = graph.invoke({
         "file_path": file_path,
         "data_source": data_source,
         "mode": "report",
         "user_question": None,
+        "template": template,
         "insights": [],
         "patterns": [],
     })
 
     if result.get("error"):
+        log_operation("analyze", status="error", username=username,
+                      source_name=source_name, metadata={"error": result["error"]})
         raise HTTPException(status_code=422, detail=result["error"])
 
-    return AnalysisResult(
-        data_summary=result.get("data_summary") or {},
-        statistical_analysis=result.get("statistical_analysis") or {},
-        patterns=result.get("patterns") or [],
-        insights=result.get("insights") or [],
+    summary = result.get("data_summary") or {}
+    stats = result.get("statistical_analysis") or {}
+    patterns = result.get("patterns") or []
+    insights = result.get("insights") or []
+
+    # Logging
+    shape = summary.get("shape", {})
+    log_operation(
+        "analyze",
+        status="ok",
+        session_id=session_id,
+        username=username,
         source_name=source_name,
+        metadata={
+            "rows": shape.get("rows"),
+            "columns": shape.get("columns"),
+            "template": template,
+        },
+    )
+
+    # Historico persistente
+    save_analysis(
+        session_id=session_id,
+        username=username,
+        source_name=source_name,
+        data_summary=summary,
+        statistical_analysis=stats,
+        patterns=patterns,
+        insights=insights,
+        template_used=template,
+    )
+
+    return AnalysisResult(
+        session_id=session_id,
+        data_summary=summary,
+        statistical_analysis=stats,
+        patterns=patterns,
+        insights=insights,
+        source_name=source_name,
+        template_used=template,
     )
 
 
 @router.post("/analyze", response_model=AnalysisResult)
 async def analyze_file(
     file: UploadFile = File(...),
+    template: str = Form(""),
+    _user: dict = Depends(get_current_user),
 ) -> AnalysisResult:
     """Recebe upload de arquivo CSV/Excel e retorna analise completa."""
     suffix = Path(file.filename or "data.csv").suffix.lower()
     if suffix not in (".csv", ".xlsx", ".xls"):
         raise HTTPException(status_code=400, detail="Formato nao suportado. Use .csv, .xlsx ou .xls")
 
-    # Salva arquivo temporario
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         content = await file.read()
         tmp.write(content)
         tmp_path = tmp.name
 
     try:
-        return _run_pipeline(file_path=tmp_path, source_name=file.filename or "arquivo")
+        return _run_pipeline(
+            username=_user.get("username", ""),
+            file_path=tmp_path,
+            source_name=file.filename or "arquivo",
+            template=template or None,
+        )
     finally:
         try:
             Path(tmp_path).unlink(missing_ok=True)
@@ -65,8 +119,10 @@ async def analyze_file(
 async def analyze_google_sheets(
     sheet_id: str = Form(...),
     tab_name: str = Form(""),
+    template: str = Form(""),
+    _user: dict = Depends(require_admin),
 ) -> AnalysisResult:
-    """Conecta a uma planilha Google Sheets e retorna analise."""
+    """Conecta a uma planilha Google Sheets e retorna analise. Somente admin."""
     from deep_agent.config import settings
     from deep_agent.sources.google_sheets import GoogleSheetsSource
 
@@ -74,15 +130,22 @@ async def analyze_google_sheets(
         raise HTTPException(status_code=400, detail="GOOGLE_CREDENTIALS_JSON nao configurado no servidor.")
 
     source = GoogleSheetsSource(sheet_id, settings.google_credentials_json, tab_name)
-    return _run_pipeline(data_source=source, source_name=f"Google Sheets: {sheet_id}")
+    return _run_pipeline(
+        username=_user.get("username", ""),
+        data_source=source,
+        source_name=f"Google Sheets: {sheet_id}",
+        template=template or None,
+    )
 
 
 @router.post("/analyze/supabase", response_model=AnalysisResult)
 async def analyze_supabase(
     table_name: str = Form(...),
     query: str = Form(""),
+    template: str = Form(""),
+    _user: dict = Depends(require_admin),
 ) -> AnalysisResult:
-    """Conecta a uma tabela Supabase e retorna analise."""
+    """Conecta a uma tabela Supabase e retorna analise. Somente admin."""
     from deep_agent.config import settings
     from deep_agent.sources.supabase_source import SupabaseSource
 
@@ -90,15 +153,22 @@ async def analyze_supabase(
         raise HTTPException(status_code=400, detail="SUPABASE_URL nao configurado no servidor.")
 
     source = SupabaseSource(table_name, settings.supabase_url, settings.supabase_key, query)
-    return _run_pipeline(data_source=source, source_name=f"Supabase: {table_name}")
+    return _run_pipeline(
+        username=_user.get("username", ""),
+        data_source=source,
+        source_name=f"Supabase: {table_name}",
+        template=template or None,
+    )
 
 
 @router.post("/analyze/bigquery", response_model=AnalysisResult)
 async def analyze_bigquery(
     table_id: str = Form(""),
     sql_query: str = Form(""),
+    template: str = Form(""),
+    _user: dict = Depends(require_admin),
 ) -> AnalysisResult:
-    """Conecta ao BigQuery e retorna analise."""
+    """Conecta ao BigQuery e retorna analise. Somente admin."""
     from deep_agent.config import settings
     from deep_agent.sources.bigquery import BigQuerySource
 
@@ -108,4 +178,9 @@ async def analyze_bigquery(
         raise HTTPException(status_code=400, detail="Informe table_id ou sql_query.")
 
     source = BigQuerySource(settings.gcp_project_id, table_id, sql_query)
-    return _run_pipeline(data_source=source, source_name="BigQuery")
+    return _run_pipeline(
+        username=_user.get("username", ""),
+        data_source=source,
+        source_name="BigQuery",
+        template=template or None,
+    )

@@ -11,6 +11,7 @@ class AgentState(TypedDict):
     data_source: Any | None  # DataSource (Any para evitar problemas de serializacao)
     user_question: str | None
     mode: str  # "report" ou "qa"
+    template: str | None  # nome do template de analise (ex: "vendas", "financeiro")
 
     # Data layer
     raw_data: Any  # pd.DataFrame (Any para evitar problemas de serialização)
