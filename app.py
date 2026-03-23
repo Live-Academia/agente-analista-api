@@ -468,7 +468,7 @@ with st.sidebar:
                 st.caption("Nenhuma analise salva ainda.")
 
     st.markdown("---")
-    page = st.radio("", ["📈 Dashboard", "💬 Chat", "📄 Relatorio"], label_visibility="collapsed")
+    page = st.radio("Pagina", ["📈 Dashboard", "💬 Chat", "📄 Relatorio"], label_visibility="collapsed")
     st.markdown("---")
     prov = os.environ.get("LLM_PROVIDER", "anthropic")
     mdl = os.environ.get("OPENAI_MODEL_NAME", "gpt-4o") if prov == "openai" else os.environ.get("MODEL_NAME", "claude")
