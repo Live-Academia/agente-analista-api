@@ -23,6 +23,8 @@ class Settings(BaseSettings):
 
     # Google Sheets (Service Account JSON como string)
     google_credentials_json: str = ""
+    google_auth_method: str = "service_account"  # "service_account" ou "oauth2"
+    google_authorized_user_json: str = ""  # JSON do OAuth2 authorized_user (alternativa ao Service Account)
 
     # Supabase
     supabase_url: str = ""
@@ -30,6 +32,11 @@ class Settings(BaseSettings):
 
     # BigQuery
     gcp_project_id: str = ""
+
+    # Autenticacao
+    auth_secret_key: str = ""  # JWT secret (32+ chars) — obrigatorio em producao
+    auth_cookie_key: str = ""  # Cookie secret para streamlit-authenticator (32+ chars)
+    auth_config_yaml: str = ""  # YAML com credenciais de usuarios (bcrypt hash)
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

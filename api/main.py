@@ -3,11 +3,30 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import analyze, chat, report
+from api.routers import analyze, chat, report, auth as auth_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Inicializa recursos compartilhados na startup do servidor."""
+    from deep_agent.config import settings
+
+    if settings.google_credentials_json:
+        from deep_agent.sources.google_sheets import GoogleSheetsSource
+
+        GoogleSheetsSource.init_client(
+            settings.google_credentials_json,
+            auth_method=settings.google_auth_method,
+            authorized_user_json=settings.google_authorized_user_json,
+        )
+
+    yield
+
 
 app = FastAPI(
     title="Deep Agent API",
@@ -15,6 +34,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # CORS — permite requisicoes do frontend (Vercel) e localhost
@@ -33,6 +53,7 @@ app.add_middleware(
 )
 
 # Routers
+app.include_router(auth_router.router, prefix="/auth", tags=["auth"])
 app.include_router(analyze.router, prefix="/api", tags=["analyze"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(report.router, prefix="/api", tags=["report"])

@@ -5,9 +5,10 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from api.schemas import AnalysisResult
+from api.security import get_current_user, require_admin
 from deep_agent.graph import build_graph
 
 router = APIRouter()
@@ -40,13 +41,13 @@ def _run_pipeline(file_path: str | None = None, data_source=None, source_name: s
 @router.post("/analyze", response_model=AnalysisResult)
 async def analyze_file(
     file: UploadFile = File(...),
+    _user: dict = Depends(get_current_user),
 ) -> AnalysisResult:
     """Recebe upload de arquivo CSV/Excel e retorna analise completa."""
     suffix = Path(file.filename or "data.csv").suffix.lower()
     if suffix not in (".csv", ".xlsx", ".xls"):
         raise HTTPException(status_code=400, detail="Formato nao suportado. Use .csv, .xlsx ou .xls")
 
-    # Salva arquivo temporario
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         content = await file.read()
         tmp.write(content)
@@ -65,8 +66,9 @@ async def analyze_file(
 async def analyze_google_sheets(
     sheet_id: str = Form(...),
     tab_name: str = Form(""),
+    _user: dict = Depends(require_admin),
 ) -> AnalysisResult:
-    """Conecta a uma planilha Google Sheets e retorna analise."""
+    """Conecta a uma planilha Google Sheets e retorna analise. Somente admin."""
     from deep_agent.config import settings
     from deep_agent.sources.google_sheets import GoogleSheetsSource
 
@@ -81,8 +83,9 @@ async def analyze_google_sheets(
 async def analyze_supabase(
     table_name: str = Form(...),
     query: str = Form(""),
+    _user: dict = Depends(require_admin),
 ) -> AnalysisResult:
-    """Conecta a uma tabela Supabase e retorna analise."""
+    """Conecta a uma tabela Supabase e retorna analise. Somente admin."""
     from deep_agent.config import settings
     from deep_agent.sources.supabase_source import SupabaseSource
 
@@ -97,8 +100,9 @@ async def analyze_supabase(
 async def analyze_bigquery(
     table_id: str = Form(""),
     sql_query: str = Form(""),
+    _user: dict = Depends(require_admin),
 ) -> AnalysisResult:
-    """Conecta ao BigQuery e retorna analise."""
+    """Conecta ao BigQuery e retorna analise. Somente admin."""
     from deep_agent.config import settings
     from deep_agent.sources.bigquery import BigQuerySource
 

@@ -39,3 +39,22 @@ class ReportResponse(BaseModel):
     """Resposta do endpoint /api/report."""
 
     report_text: str
+
+
+# ── Auth ────────────────────────────────────────────────────────────────────
+
+
+class Token(BaseModel):
+    """JWT Bearer token retornado pelo endpoint /auth/token."""
+
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserInfo(BaseModel):
+    """Informacoes do usuario autenticado retornadas pelo endpoint /auth/me."""
+
+    username: str
+    name: str
+    email: str
+    roles: list[str]

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from api.schemas import ChatRequest, ChatResponse
+from api.security import get_current_user
 from deep_agent.chains.qa import format_qa_data, qa_node
 from deep_agent.config import get_llm
 from deep_agent.prompts.qa_prompt import qa_prompt
@@ -33,7 +34,10 @@ def _build_state_from_request(req: ChatRequest) -> dict:
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest) -> ChatResponse:
+async def chat(
+    req: ChatRequest,
+    _user: dict = Depends(get_current_user),
+) -> ChatResponse:
     """Responde uma pergunta sobre os dados (resposta completa)."""
     state = _build_state_from_request(req)
     result = qa_node(state)
@@ -41,7 +45,10 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
 
 @router.post("/chat/stream")
-async def chat_stream(req: ChatRequest) -> StreamingResponse:
+async def chat_stream(
+    req: ChatRequest,
+    _user: dict = Depends(get_current_user),
+) -> StreamingResponse:
     """Responde uma pergunta com streaming de tokens (SSE)."""
     import json
 

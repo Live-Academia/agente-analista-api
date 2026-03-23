@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.schemas import ReportRequest, ReportResponse
+from api.security import get_current_user
 from deep_agent.nodes.insights import insights_node
 from deep_agent.nodes.report import report_node
 
@@ -12,7 +13,10 @@ router = APIRouter()
 
 
 @router.post("/report", response_model=ReportResponse)
-async def generate_report(req: ReportRequest) -> ReportResponse:
+async def generate_report(
+    req: ReportRequest,
+    _user: dict = Depends(get_current_user),
+) -> ReportResponse:
     """Gera relatorio Markdown completo a partir do analysis_state."""
     a = req.analysis_state
     state = {
